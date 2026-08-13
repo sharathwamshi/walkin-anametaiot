@@ -308,7 +308,7 @@ class CandidateTestSession(db.Model):
     test_level_id = db.Column(db.Integer, db.ForeignKey("test_levels.id"), nullable=False)
 
     status = db.Column(db.String(20), default="not_started")
-    # not_started / in_progress / flagged / completed / disqualified
+    # not_started / in_progress / flagged / completed / disqualified / interviewed
     start_time = db.Column(db.DateTime)
     end_time = db.Column(db.DateTime)
     score = db.Column(db.Float)
@@ -317,6 +317,7 @@ class CandidateTestSession(db.Model):
     admin_reset_count = db.Column(db.Integer, default=0)
     last_heartbeat = db.Column(db.DateTime)
     session_token = db.Column(db.String(64), default=gen_session_token)
+    interviewed_by = db.Column(db.String(50))  # e.g. "int-1".."int-4" — who interviewed this candidate
 
     answers = db.relationship("CandidateAnswer", backref="session", lazy="dynamic",
                                cascade="all, delete-orphan")
@@ -332,6 +333,7 @@ class CandidateTestSession(db.Model):
             "score": self.score, "tab_violation_count": self.tab_violation_count,
             "is_flagged": self.is_flagged, "admin_reset_count": self.admin_reset_count,
             "last_heartbeat": to_iso_z(self.last_heartbeat),
+            "interviewed_by": self.interviewed_by,
         }
 
 

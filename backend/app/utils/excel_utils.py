@@ -33,6 +33,19 @@ def _styled_header_sheet(headers, sheet_title, sample_rows=None):
     return buf
 
 
+def build_export_xlsx(headers, rows, sheet_title="Export"):
+    """Builds a styled xlsx (same navy/white header look as the upload
+    templates) for downloadable data exports — candidate lists, live session
+    lists, results lists. Returns an in-memory buffer ready for send_file."""
+    return _styled_header_sheet(headers, sheet_title, sample_rows=rows)
+
+
+def safe_filename(name):
+    """Turns an event/level name into something safe to use as a filename."""
+    cleaned = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in (name or "")).strip()
+    return cleaned or "export"
+
+
 def candidate_template_bytes():
     sample = [
         ("Ananya Rao", "ananya.rao@example.com", "9900011122", "KSIT Bangalore",

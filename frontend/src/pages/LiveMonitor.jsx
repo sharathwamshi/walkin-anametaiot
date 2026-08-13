@@ -3,12 +3,14 @@ import { useParams, Link } from "react-router-dom";
 import api from "../api/client";
 import { LoadingBlock } from "../components/Spinner.jsx";
 
-const STATUS_OPTIONS = ["not_started", "in_progress", "flagged", "completed", "disqualified"];
+const STATUS_OPTIONS = ["not_started", "in_progress", "flagged", "completed", "interviewed", "disqualified"];
+const INTERVIEWER_OPTIONS = ["int-1", "int-2", "int-3", "int-4"];
 
 export default function LiveMonitor() {
   const { levelId } = useParams();
   const [data, setData] = useState(null);
   const [updatingId, setUpdatingId] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = async () => {
     const res = await api.get(`/tests/levels/${levelId}/live`);
@@ -39,6 +41,31 @@ export default function LiveMonitor() {
     }
   }
 
+  async function setInterviewer(sessionId, interviewer) {
+    setUpdatingId(sessionId);
+    try {
+      await api.put(`/tests/sessions/${sessionId}/interviewer`, { interviewed_by: interviewer });
+      await load();
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  async function exportToExcel() {
+    setExporting(true);
+    try {
+      const res = await api.get(`/tests/levels/${levelId}/live/export`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `live_monitor_round${data.level.level_number}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (!data) return <LoadingBlock label="Loading live session data…" />;
   const { level, sessions, flagged_count, in_progress_count, completed_count } = data;
 
@@ -49,7 +76,12 @@ export default function LiveMonitor() {
           <h2>Live Monitor — Round {level.level_number}: {level.name}</h2>
           <p>Auto-refreshes every 3 seconds. Flagged candidates are locked until you reset them.</p>
         </div>
-        <Link to="/tests" className="btn btn-outline">← Back to Levels</Link>
+        <div className="flex gap-8">
+          <button className="btn btn-outline" onClick={exportToExcel} disabled={exporting}>
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}
+          </button>
+          <Link to="/tests" className="btn btn-outline">← Back to Levels</Link>
+        </div>
       </div>
 
       <div className="grid grid-3">
@@ -71,7 +103,7 @@ export default function LiveMonitor() {
         <div className="flex justify-between items-center" style={{ marginBottom: 14 }}>
           <h3>Candidate Sessions</h3>
           <span className="small muted">
-            "Set status" is a manual override for stuck sessions — separate from tab-violation flags.
+            "Set status" and "Interviewer" are manual overrides — separate from tab-violation flags.
           </span>
         </div>
         {sessions.length === 0 ? (
@@ -81,7 +113,7 @@ export default function LiveMonitor() {
             <thead>
               <tr>
                 <th>ID</th><th>Name</th><th>Status</th><th>Tab Violations</th><th>Score</th>
-                <th>Violation Reset</th><th>Set Status (admin override)</th>
+                <th>Violation Reset</th><th>Set Status</th><th>Interviewed By</th>
               </tr>
             </thead>
             <tbody>
@@ -112,6 +144,19 @@ export default function LiveMonitor() {
                     >
                       {STATUS_OPTIONS.map((opt) => (
                         <option key={opt} value={opt}>{opt.replace("_", " ")}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <select
+                      value={s.interviewed_by || ""}
+                      disabled={updatingId === s.id}
+                      onChange={(e) => setInterviewer(s.id, e.target.value)}
+                      style={{ fontSize: 12.5, padding: "6px 8px" }}
+                    >
+                      <option value="">— none —</option>
+                      {INTERVIEWER_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
                       ))}
                     </select>
                     {updatingId === s.id && <span className="small muted" style={{ marginLeft: 6 }}>saving…</span>}

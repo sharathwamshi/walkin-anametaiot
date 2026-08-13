@@ -12,6 +12,7 @@ export default function Candidates() {
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState({ whatsapp: true, email: true });
   const [uploading, setUploading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [progress, setProgress] = useState(null);
   const [sending, setSending] = useState(false);
@@ -44,6 +45,20 @@ export default function Candidates() {
     const url = URL.createObjectURL(res.data);
     const a = document.createElement("a");
     a.href = url; a.download = "candidate_upload_template.xlsx"; a.click();
+  }
+
+  async function exportCandidates() {
+    if (!activeEvent) return;
+    setExporting(true);
+    try {
+      const res = await api.get(`/candidates/export?event_id=${activeEvent.id}`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `candidates_${activeEvent.name}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function handleUpload(e) {
@@ -97,6 +112,9 @@ export default function Candidates() {
         </div>
         <div className="flex gap-8">
           <button className="btn btn-outline" onClick={downloadTemplate}>⬇ Download Template</button>
+          <button className="btn btn-outline" onClick={exportCandidates} disabled={exporting || candidates.length === 0}>
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}
+          </button>
           <button className="btn btn-primary" onClick={() => fileRef.current.click()} disabled={uploading}>
             {uploading ? "Uploading…" : "⬆ Upload Candidate List"}
           </button>

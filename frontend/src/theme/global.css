@@ -180,6 +180,7 @@ tr:hover td { background: #FAFBFE; }
 .badge-sending { background: var(--orange-light); color: var(--orange); }
 .badge-sent, .badge-completed, .badge-passed { background: var(--green-light); color: var(--green); }
 .badge-failed, .badge-flagged, .badge-disqualified { background: var(--red-light); color: var(--red); }
+.badge-interviewed { background: #EFEBFC; color: var(--badge-1); }
 .badge-progress, .badge-active { background: #E8F0FE; color: var(--navy-light); }
 
 .progress-track { background: #EEF1F6; border-radius: 100px; height: 10px; overflow: hidden; }

@@ -1,7 +1,7 @@
 -- AnametaIoT Walk-in Drive Console — MySQL schema
 -- Generated directly from the SQLAlchemy models (app/models/models.py)
 -- For a brand-new database: mysql -u <user> -p walkin_drive < schema.sql
--- For an EXISTING database, use migration_add_registration_form_config.sql instead.
+-- For an EXISTING database, use the migration_*.sql files instead.
 
 SET FOREIGN_KEY_CHECKS=0;
 
@@ -111,6 +111,7 @@ CREATE TABLE candidate_test_sessions (
 	admin_reset_count INTEGER, 
 	last_heartbeat DATETIME, 
 	session_token VARCHAR(64), 
+	interviewed_by VARCHAR(50), 
 	PRIMARY KEY (id), 
 	FOREIGN KEY(candidate_id) REFERENCES candidates (id), 
 	FOREIGN KEY(test_level_id) REFERENCES test_levels (id)

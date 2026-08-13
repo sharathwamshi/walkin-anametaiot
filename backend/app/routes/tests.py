@@ -7,7 +7,7 @@ from app.models.models import (
     Event, TestLevel, Question, Candidate, CandidateTestSession,
     CandidateAnswer, CandidateLevelResult, to_iso_z, normalize_unique_id, unique_id_match_filter,
 )
-from app.utils.excel_utils import question_template_bytes, parse_question_excel
+from app.utils.excel_utils import question_template_bytes, parse_question_excel, build_export_xlsx, safe_filename
 from app.utils.messaging import send_whatsapp, send_email
 from app.utils.message_templates import (
     test_invite_whatsapp, test_invite_email_html,
@@ -290,6 +290,31 @@ def live_monitor(level_id):
     })
 
 
+@tests_bp.get("/levels/<int:level_id>/live/export")
+@jwt_required()
+def export_live_monitor(level_id):
+    level = TestLevel.query.get_or_404(level_id)
+    sessions = level.sessions.order_by(CandidateTestSession.id).all()
+
+    headers = [
+        "Candidate ID", "Name", "Status", "Tab Violations", "Score",
+        "Interviewed By", "Admin Reset Count", "Last Heartbeat",
+    ]
+    rows = [[
+        s.candidate.unique_id if s.candidate else "",
+        s.candidate.name if s.candidate else "",
+        "flagged" if s.is_flagged else s.status,
+        s.tab_violation_count, s.score, s.interviewed_by or "",
+        s.admin_reset_count,
+        s.last_heartbeat.strftime("%Y-%m-%d %H:%M") if s.last_heartbeat else "",
+    ] for s in sessions]
+
+    buf = build_export_xlsx(headers, rows, sheet_title="Live Monitor")
+    filename = f"live_monitor_round{level.level_number}_{safe_filename(level.name)}.xlsx"
+    return send_file(buf, as_attachment=True, download_name=filename,
+                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 @tests_bp.post("/sessions/<int:session_id>/reset")
 @jwt_required()
 def reset_session(session_id):
@@ -305,7 +330,8 @@ def reset_session(session_id):
     return jsonify(session.to_dict())
 
 
-ADMIN_OVERRIDABLE_STATUSES = ["not_started", "in_progress", "flagged", "completed", "disqualified"]
+ADMIN_OVERRIDABLE_STATUSES = ["not_started", "in_progress", "flagged", "completed", "disqualified", "interviewed"]
+INTERVIEWER_OPTIONS = ["int-1", "int-2", "int-3", "int-4"]
 
 
 def _score_session(session):
@@ -349,6 +375,27 @@ def set_session_status(session_id):
     return jsonify(session.to_dict())
 
 
+@tests_bp.put("/sessions/<int:session_id>/interviewer")
+@jwt_required()
+def set_session_interviewer(session_id):
+    """Assigns (or clears) which interviewer handled this candidate — a
+    separate concern from the session status above, so the two can be set
+    independently from the Live Monitor."""
+    session = CandidateTestSession.query.get_or_404(session_id)
+    data = request.get_json(force=True) or {}
+    interviewer = data.get("interviewed_by")
+
+    if interviewer == "" or interviewer is None:
+        session.interviewed_by = None
+    elif interviewer in INTERVIEWER_OPTIONS:
+        session.interviewed_by = interviewer
+    else:
+        return jsonify({"error": f"interviewed_by must be one of {INTERVIEWER_OPTIONS} or empty to clear"}), 400
+
+    db.session.commit()
+    return jsonify(session.to_dict())
+
+
 # ---------------------------------------------------------------------------
 # ADMIN — cutoff, selection, next-level invite, final results
 # ---------------------------------------------------------------------------
@@ -367,7 +414,7 @@ def apply_cutoff(level_id):
     level.completed_at = datetime.utcnow()
 
     results = []
-    for session in level.sessions.filter_by(status="completed"):
+    for session in level.sessions.filter(CandidateTestSession.score.isnot(None)):
         existing = CandidateLevelResult.query.filter_by(
             candidate_id=session.candidate_id, test_level_id=level.id).first()
         passed = (session.score or 0) >= cutoff
@@ -447,20 +494,18 @@ def results_qr(level_id):
     return jsonify({"url": url, "qr_image": f"/static/qrcodes/{filename}"})
 
 
-@tests_bp.get("/levels/<int:level_id>/results")
-@jwt_required()
-def results_admin(level_id):
-    """Scores for every completed session in this round, visible as soon as
-    candidates finish — not gated behind having already applied a cut-off.
-    (CandidateLevelResult rows only exist after apply-cutoff runs, so building
-    this view from them was hiding every score until the admin had already
-    committed to a cutoff number, which is backwards — you need to see the
-    scores to pick a sensible cutoff in the first place.) Once a cutoff has
-    been applied, pass/fail and selection status are merged in from those
-    rows; before that, "passed" is null to mean "not decided yet", distinct
-    from an actual fail."""
-    level = TestLevel.query.get_or_404(level_id)
-    sessions = (level.sessions.filter_by(status="completed")
+def _build_results_output(level):
+    """Shared by the JSON results endpoint and the Excel export — see
+    results_admin() below for why this reads from completed sessions rather
+    than only from CandidateLevelResult rows.
+
+    Filters on "has a computed score" rather than strictly status=="completed":
+    a session that moves on to "interviewed" (or any other downstream status)
+    after finishing the test already has its score locked in and must keep
+    showing up here — filtering on the literal status string would make a
+    candidate silently vanish from Results the moment an admin updates their
+    status on Live Monitor, which is not the intent of that status field."""
+    sessions = (level.sessions.filter(CandidateTestSession.score.isnot(None))
                 .order_by(CandidateTestSession.score.desc()).all())
     results_by_candidate = {r.candidate_id: r for r in level.results}
     max_score = sum(q.marks for q in level.questions) or None
@@ -480,7 +525,43 @@ def results_admin(level_id):
             "selected_for_next": r.selected_for_next if r else False,
             "next_level_invite_sent": r.next_level_invite_sent if r else False,
         })
-    return jsonify(output)
+    return output
+
+
+@tests_bp.get("/levels/<int:level_id>/results")
+@jwt_required()
+def results_admin(level_id):
+    """Scores for every completed session in this round, visible as soon as
+    candidates finish — not gated behind having already applied a cut-off.
+    (CandidateLevelResult rows only exist after apply-cutoff runs, so building
+    this view from them was hiding every score until the admin had already
+    committed to a cutoff number, which is backwards — you need to see the
+    scores to pick a sensible cutoff in the first place.) Once a cutoff has
+    been applied, pass/fail and selection status are merged in from those
+    rows; before that, "passed" is null to mean "not decided yet", distinct
+    from an actual fail."""
+    level = TestLevel.query.get_or_404(level_id)
+    return jsonify(_build_results_output(level))
+
+
+@tests_bp.get("/levels/<int:level_id>/results/export")
+@jwt_required()
+def export_results(level_id):
+    level = TestLevel.query.get_or_404(level_id)
+    results = _build_results_output(level)
+
+    headers = ["Candidate ID", "Name", "Score", "Max Score", "Passed", "Selected For Next", "Next Level Invite Sent"]
+    rows = [[
+        r["candidate_unique_id"], r["candidate_name"], r["score"], r["max_score"],
+        "Awaiting cut-off" if r["passed"] is None else ("Yes" if r["passed"] else "No"),
+        "Yes" if r["selected_for_next"] else "No",
+        "Yes" if r["next_level_invite_sent"] else "No",
+    ] for r in results]
+
+    buf = build_export_xlsx(headers, rows, sheet_title="Results")
+    filename = f"results_round{level.level_number}_{safe_filename(level.name)}.xlsx"
+    return send_file(buf, as_attachment=True, download_name=filename,
+                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, send_file, current_app
 from flask_jwt_extended import jwt_required
 from app.extensions import db
 from app.models.models import Candidate, Event, normalize_unique_id, unique_id_match_filter
-from app.utils.excel_utils import candidate_template_bytes, parse_candidate_excel
+from app.utils.excel_utils import candidate_template_bytes, parse_candidate_excel, build_export_xlsx, safe_filename
 from app.utils.qr_utils import generate_candidate_qr
 from app.utils.form_validation import validate_registration_data
 
@@ -62,6 +62,35 @@ def list_candidates():
         q = q.filter_by(checked_in=(checked_in == "true"))
     candidates = q.order_by(Candidate.registered_at.desc()).all()
     return jsonify([c.to_dict() for c in candidates])
+
+
+@candidates_bp.get("/export")
+@jwt_required()
+def export_candidates():
+    event_id = request.args.get("event_id")
+    if not event_id:
+        return jsonify({"error": "event_id is required"}), 400
+
+    event = Event.query.get_or_404(event_id)
+    candidates = Candidate.query.filter_by(event_id=event_id).order_by(Candidate.registered_at.desc()).all()
+
+    headers = [
+        "Candidate ID", "Name", "Email", "Phone", "College", "Branch", "CGPA",
+        "Passout Year", "Resume Link", "Source", "QR Status", "Checked In",
+        "Checked In At", "Welcome Sent", "Registered At",
+    ]
+    rows = [[
+        c.unique_id, c.name, c.email, c.phone, c.college, c.branch, c.cgpa,
+        c.passout_year, c.resume_link, c.source, c.qr_send_status,
+        "Yes" if c.checked_in else "No",
+        c.checked_in_at.strftime("%Y-%m-%d %H:%M") if c.checked_in_at else "",
+        "Yes" if c.welcome_sent else "No",
+        c.registered_at.strftime("%Y-%m-%d %H:%M") if c.registered_at else "",
+    ] for c in candidates]
+
+    buf = build_export_xlsx(headers, rows, sheet_title="Candidates")
+    return send_file(buf, as_attachment=True, download_name=f"candidates_{safe_filename(event.name)}.xlsx",
+                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @candidates_bp.get("/<int:candidate_id>")

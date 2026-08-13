@@ -11,6 +11,7 @@ export default function Results() {
   const [selectedLevelId, setSelectedLevelId] = useState(null);
   const [results, setResults] = useState([]);
   const [loadingResults, setLoadingResults] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [cutoff, setCutoff] = useState("");
   const [channels, setChannels] = useState({ whatsapp: false, email: true });
   const [isFinal, setIsFinal] = useState(false);
@@ -63,6 +64,20 @@ export default function Results() {
     setQr(res.data);
   }
 
+  async function exportResults() {
+    if (!selectedLevelId) return;
+    setExporting(true);
+    try {
+      const res = await api.get(`/tests/levels/${selectedLevelId}/results/export`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement("a");
+      a.href = url; a.download = `results_round${level?.level_number || selectedLevelId}.xlsx`; a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const level = levels.find((l) => l.id === selectedLevelId);
 
   return (
@@ -72,11 +87,16 @@ export default function Results() {
           <h2>Results & Selection</h2>
           <p>Set a cut-off score, notify shortlisted candidates, and share the results QR at the venue.</p>
         </div>
-        <select value={selectedLevelId || ""} onChange={(e) => setSelectedLevelId(Number(e.target.value))}>
-          {levels.map((lv) => (
-            <option key={lv.id} value={lv.id}>Round {lv.level_number} — {lv.name}</option>
-          ))}
-        </select>
+        <div className="flex gap-8 items-center">
+          <select value={selectedLevelId || ""} onChange={(e) => setSelectedLevelId(Number(e.target.value))}>
+            {levels.map((lv) => (
+              <option key={lv.id} value={lv.id}>Round {lv.level_number} — {lv.name}</option>
+            ))}
+          </select>
+          <button className="btn btn-outline" onClick={exportResults} disabled={exporting || !selectedLevelId || results.length === 0}>
+            {exporting ? "Exporting…" : "⬇ Export to Excel"}
+          </button>
+        </div>
       </div>
 
       {level && (
